@@ -10,7 +10,7 @@ output:
 ```{r setup, include=FALSE}
 set.seed(7406)
 
-# setwd("./")
+setwd("./")
 
 library(tidyverse)
 library(dplyr)
@@ -26,8 +26,8 @@ Introduction - What are you trying to do? Where does the data come from? Sometim
 ```{r load data}
 #load spreadsheet (takes several minutes)
 #data_orig = read_excel("complaints-2024-02-12_19_15.xlsx")
-data_orig = read.csv("C:/Users/mroberts/Desktop/My Stuff/School/DVA/complaints-2024-03-04_20_55.csv")
-census <- read.csv("C:/Users/mroberts/Desktop/My Stuff/School/DVA/census_data_by_zip.csv")
+data_orig = read.csv("complaints-2024-03-04_20_55.csv")
+census <- read.csv("census_data_by_zip.csv")
 
 ```
 
