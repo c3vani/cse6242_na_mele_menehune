@@ -10,7 +10,7 @@ output:
 ```{r setup, include=FALSE}
 set.seed(7406)
 
-setwd("./")
+# setwd("./")
 
 library(tidyverse)
 library(dplyr)
@@ -26,14 +26,16 @@ Introduction - What are you trying to do? Where does the data come from? Sometim
 ```{r load data}
 #load spreadsheet (takes several minutes)
 #data_orig = read_excel("complaints-2024-02-12_19_15.xlsx")
-data_orig = read.csv("complaints-2024-03-04_20_55.csv")
+data_orig = read.csv("C:/Users/mroberts/Desktop/My Stuff/School/DVA/complaints-2024-03-04_20_55.csv")
+census <- read.csv("C:/Users/mroberts/Desktop/My Stuff/School/DVA/census_data_by_zip.csv")
+
 ```
 
 # Exploratory Data Analysis
 Size of dataset, variable descriptions, distribution of data, heat maps, correlation plots. This section was heavy on visuals.
 
 ```{r explore data}
-data = data_orig   #so we don't have to keep loading it if we need to restart
+data = data.frame(data_orig)   #so we don't have to keep loading it if we need to restart
 
 #summarize data
 head(data)
@@ -41,30 +43,31 @@ summary(data)
 dim(data)
 colSums(is.na(data))  #num of blank columns
 
-#clean data for exploration
-data$date_received <- as.Date(data$'Date.received',format = "%m/%d/%y")
-data$date_received_year <- format(as.Date(data$date_received, 
-                                          format="%m/%d/%y"),"%Y")
-data$date_sent_to_company <- as.Date(data$'Date.sent.to.company',format = "%m/%d/%y")
-data$date_sent_to_company_year <- format(as.Date(data$date_sent_to_company,
-                                                 format="%m/%d/%y"),"%Y")
-data <- data %>% rename_at('Sub.product', ~'Sub_product')
-data <- data %>% rename_at('Sub.issue', ~'Sub_issue')
-data <- data %>% rename_at('ZIP.code', ~'zip')
-data <- data %>% rename_at('Consumer.consent.provided.', ~'consent')
-data <- data %>% rename_at('Company.response.to.consumer', ~'response_sent')
-data <- data %>% rename_at('Timely.response.', ~'response_timely')
-data <- data %>% rename_at('Consumer.disputed.', ~'response_disputed')
+# Update column types
+data$Product <- as.factor(data$Product)
+data$Sub.product <- as.factor(data$Sub.product)
+data$Issue <- as.factor(data$Issue)
+data$Sub.issue <- as.factor(data$Sub.issue)
+data$State <- as.factor(data$State)
+data$Company.response.to.consumer <- as.factor(data$Company.response.to.consumer)
+data$Company.public.response <- as.factor(data$Company.public.response)
+data$Consumer.consent.provided. <- as.factor(data$Consumer.consent.provided.)
+data$Submitted.via <- as.factor(data$Submitted.via)
+data$Date.received <- mdy(data$Date.received)
+data$Date.sent.to.company <- mdy(data$Date.sent.to.company)
 
-#zip codes with XX in data - 230,158
-data %>%
-    filter(str_detect(zip, "XX")) %>%
-    summarise(n = n())
+# data$date_received_year <- format(as.Date(data$date_received, format="%m/%d/%y"),"%Y")
+#data$date.sent.to.company <- as.Date(data$Date.sent.to.company,format = "%m/%d/%y")
+data$date_sent_to_company_year <- format(as.Date(data$Date.sent.to.company, format="%m/%d/%y"),"%Y")
+colnames(data) <- c("Date_received","Product", "Sub_product", "Issue", "Sub_issue", "Consumer_complaint_narrative", "Company_public_response", "Company", "State", "Zip", "Tags", "Consent", "Submitted_via", "Date_sent_to_company", "Response_sent", "Response_timely", "Response_disputed", "Complaint_ID", "Date_received_year")
+
+#zip codes with XX in data - 230,158, zip codes have been anonymized, this removed those anonymous characters
+data$Consumer_complaint_narrative <- gsub("X", "", data$Consumer_complaint_narrative)
 
 #some zip codes do not have clean data
 #add a column to just get data with
 data_clean_zip <- data %>%
-    filter(str_detect(zip, "^[:digit:]+$")) 
+  filter(str_detect(Zip, "^[:digit:]+$")) 
 
 #save plottable data into new variable
 dataplot <- data %>% select(-one_of('Consumer.complaint.narrative',
@@ -80,7 +83,7 @@ Roll up data by category summary counts
 ```{r summarize data}
 data_clean_zip %>%
     # 1,788,973 vs 2,036,509 clean zip codes (88% clean)
-    group_by(substr(zip,1,3)) %>%
+    group_by(substr(Zip,1,3)) %>%
     summarise(n = n()) %>%
     arrange(desc(n))
 
@@ -88,7 +91,7 @@ data_summarized <- data_clean_zip %>%
     group_by(Product,
              Issue,
              State,
-             date_received_year) %>%
+             Date_received_year) %>%
     summarise(n = n()) %>%
     arrange(desc(n))
 data_summarized
@@ -98,7 +101,7 @@ write.csv(data_summarized, "cfpb_data_summarized.csv", row.names=FALSE)
 
 plot data
 ```{r plot data}
-cols1 <- c("date_received","Issue")
+cols1 <- c("Date_received","Issue")
 issue_summary <- dataplot %>%
     group_by(across(all_of(cols1))) %>% 
     filter(Issue %in% c("Improper use of your report", 
@@ -108,13 +111,13 @@ issue_summary <- dataplot %>%
     arrange(desc(n))
 issue_summary
 plot1 <- issue_summary %>%
-    ggplot(aes(x=date_received, 
+    ggplot(aes(x=Date_received, 
                y=n, 
                fill=Issue)) +
     geom_area()
 plot1
 
-cols2 <- c("date_received","Company")
+cols2 <- c("Date_received","Company")
 company_summary <- dataplot %>%
     group_by(across(all_of(cols2))) %>% 
     filter(Company %in% c("EQUIFAX, INC.", 
@@ -124,13 +127,13 @@ company_summary <- dataplot %>%
     arrange(desc(n))
 company_summary
 plot2 <- company_summary %>%
-    ggplot(aes(x=date_received, 
+    ggplot(aes(x=Date_received, 
                y=n, 
                fill=Company)) +
     geom_area()
 plot2
 
-cols3 <- c("date_received","State")
+cols3 <- c("Date_received","State")
 state_summary <- dataplot %>%
     group_by(across(all_of(cols3))) %>% 
     filter(State %in% c("FL", 
@@ -143,7 +146,7 @@ state_summary <- dataplot %>%
     arrange(desc(n))
 state_summary
 plot3 <- state_summary %>%
-    ggplot(aes(x=date_received, 
+    ggplot(aes(x=Date_received, 
                y=n, 
                group=State, 
                color=State)) +
@@ -152,20 +155,69 @@ plot3 + stat_smooth(aes(group=State),
                     method = "loess", 
                     size = 1)
 
-cols4 <- c("date_received","response_sent")
+cols4 <- c("Date_received","Response_sent")
 response_summary <- dataplot %>%
     group_by(across(all_of(cols4))) %>% 
     summarise(n = n()) %>%
     arrange(desc(n))
 response_summary
 plot4 <- response_summary %>%
-    ggplot(aes(x=date_received, 
+    ggplot(aes(x=Date_received, 
                y=n, 
-               group=response_sent, 
-               color=response_sent)) +
+               group=Response_sent, 
+               color=Response_sent)) +
     geom_line(linewidth = 0.2)
-plot4 + stat_smooth(aes(group=response_sent),
+plot4 + stat_smooth(aes(group=Response_sent),
                     method = "loess", 
                     size = 1)
+
+# Complaints by Product by Year
+df_count <- data %>%
+  group_by(Date_received_year, Product) %>%
+  summarise(Count = n())
+
+# Plot
+ggplot(df_count, aes(x = Date_received_year, y = Count, fill = Product)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Year", y = "Count", fill = "Product", title = "Complaints by Product by Year") +
+  theme_minimal() +
+  scale_x_discrete(breaks = unique(df_count$Date_received_year))
+
+# Table of Complaints by Product by Year
+product_year_table <- table(data$Product, data$Date_received_year)
+product_year_table
+
+joint <- merge(data, census, by.x = "Zip", by.y = "zip", all = FALSE)
+
+# Complaints by State by Year
+state_count <- joint %>%
+ group_by(Date_received_year, State) %>%
+ summarise(count = n())
+
+# state_count
+
+# Create the bubble chart
+ggplot(state_count, aes(x = Date_received_year, y = State, size = count)) +
+  geom_point(alpha = 0.6) +
+  scale_size(range = c(1, 15)) +
+  theme_minimal() +
+  labs(title = "Complaints by State by Year", x = "Year", y = "State", size = "Count")
+
+# Complaints by Income by Year
+income_table <- table(joint$income_mean_household_dollars, joint$Date_received_year)
+income_table
+
+joint_count <- joint %>%
+ group_by(Date_received_year, income_mean_household_dollars) %>%
+ summarise(count = n())
+joint_count
+
+# Create the bubble chart
+ggplot(joint_count, aes(x = Date_received_year, y = income_mean_household_dollars)) +
+  geom_point(aes(size = count), alpha = 0.7) +
+  scale_size(range = c(1, 15)) +  
+  scale_y_continuous(labels = scales::comma) +
+  theme_minimal() +
+  labs(x = "Year", y = "Income", size = "Count", title = "Bubble Chart of Complaints by Income over the years")
 
 ```
