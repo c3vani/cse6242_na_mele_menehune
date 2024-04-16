@@ -1,0 +1,141 @@
+---
+title: "Project"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  fig_width: 4
+  fig_height: 3
+---
+```{r setup, include=FALSE}
+set.seed(7406)
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(Rserve)
+
+knitr::opts_chunk$set(echo = TRUE,fig.align='center') 
+```
+
+# Introduction
+Introduction - What are you trying to do? Where does the data come from? Sometimes I break this into a two sections - Problem Description and Data Set
+
+```{r population data}
+#load data from census.gov for 2020 Dicennial Census P1 Population Data
+data_population = read.csv("2020_census_population.csv")
+
+data_population = data_population[-1,-5]
+data_population$zip = substr(data_population$GEO_ID,10,15)
+data_population$pop = as.numeric(data_population$B01003_001E) 
+data_population$pop_moe = as.numeric(data_population$B01003_001M) 
+data_population = data_population[,5:7]
+
+glimpse(data_population)
+```
+
+```{r race data}
+#load data from census.gov for 2020 Dicennial Census P3 Race Data
+
+data_race = read.csv("2020_census_race.csv")
+
+data_race = data_race[-1,-11]
+data_race$zip = substr(data_race$GEO_ID,10,15)
+data_race$pop_white = as.numeric(data_race$P3_002N)
+data_race$pop_black_or_aa = as.numeric(data_race$P3_003N)
+data_race$pop_ai_or_an = as.numeric(data_race$P3_004N)
+data_race$pop_asian = as.numeric(data_race$P3_005N)
+data_race$pop_nh_or_opi = as.numeric(data_race$P3_006N)
+data_race$pop_other = as.numeric(data_race$P3_007N)
+data_race$pop_multiple = as.numeric(data_race$P3_008N)
+data_race = data_race[,11:18]
+
+glimpse(data_race)
+
+```
+
+```{r ethnicity data}
+#load data from census.gov for 2020 Dicennial Census P4
+#Hispanic or Lation Origin Data
+data_ethnicity = read.csv("2020_census_ethnicity.csv")
+
+data_ethnicity = data_ethnicity[-1,-6]
+data_ethnicity$zip = substr(data_ethnicity$GEO_ID,10,15)
+data_ethnicity$pop_hol = as.numeric(data_ethnicity$P4_003N) 
+data_ethnicity$pop_not_hol = as.numeric(data_ethnicity$P4_002N) 
+data_ethnicity = data_ethnicity[,6:8]
+
+glimpse(data_ethnicity)
+```
+
+```{r income data}
+#load data from census.gov for 2020 Dicennial Census S1902 
+#Mean Income in the Past 12 months
+data_income = read.csv("2020_census_mean_income.csv")
+
+data_income = data_income[-1,-171]
+data_income$zip = substr(data_income$GEO_ID,10,15)
+data_income$income_cnt_households = as.numeric(data_income$S1902_C01_001E)
+data_income$income_cnt_households_moe = as.numeric(data_income$S1902_C01_001M)
+data_income$income_cnt_households_with_earnings = as.numeric(data_income$S1902_C01_002E)
+data_income$income_cnt_households_with_earnings_moe = as.numeric(data_income$S1902_C01_002M) + as.numeric(data_income$S1902_C01_002M)
+data_income$income_cnt_households_with_pub_assist = as.numeric(data_income$S1902_C01_008E) + as.numeric(data_income$S1902_C01_009E)
+data_income$income_cnt_households_with_pub_assist_moe = as.numeric(data_income$S1902_C01_009M)
+data_income$income_mean_household_dollars = as.numeric(data_income$S1902_C03_001E)
+data_income$income_mean_household_dollars_moe = as.numeric(data_income$S1902_C03_001M)
+
+data_income = data_income[,171:179]
+
+glimpse(data_income)
+```
+
+#combine datasets
+```{r combined data}
+data = left_join(data_population, 
+                 data_race, 
+                 by = join_by(zip == zip))
+data = left_join(data, 
+                 data_ethnicity, 
+                 by = join_by(zip == zip))
+data = left_join(data, 
+                 data_income, 
+                 by = join_by(zip == zip))
+```
+
+Link to known zip code data
+```{r zip data}
+###########################################################
+#load zip code data
+data_zip = read.csv("zip_code_database.csv",
+                    colClasses = (rep("character",15)))
+data_zip$zip_three <- substr(data_zip$zip,1,3)     #first three digits of zip code
+
+#zip and state and remove duplicate lines
+data_zip <- data_zip %>%
+    select(zip,zip_three,state) %>%
+    distinct(.keep_all = TRUE)
+
+###########################################################
+#merge data
+final_census_data <- left_join(data, 
+                               data_zip, 
+                               by=c('zip'='zip'))
+
+write.csv(final_census_data, "census_data_by_zip.csv", row.names=FALSE)
+```
+
+# Exploratory Data Analysis
+Size of dataset, variable descriptions, distribution of data, heat maps, correlation plots. This section was heavy on visuals.
+
+```{r explore data}
+
+#summarize data
+head(data)
+summary(data) 
+dim(data)
+colSums(is.na(data))  #num of blank columns
+
+
+```
+

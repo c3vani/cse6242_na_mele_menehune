@@ -1,0 +1,184 @@
+---
+title: "Project"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  fig_width: 4
+  fig_height: 3
+---
+```{r setup, include=FALSE}
+set.seed(7406)
+
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+knitr::opts_chunk$set(echo = TRUE,fig.align='center') 
+```
+
+# Introduction
+Introduction - What are you trying to do? Where does the data come from? Sometimes I break this into a two sections - Problem Description and Data Set
+
+```{r load data}
+#load data (takes several minutes)
+data_orig = read.csv("complaints-2024-03-04_20_55.csv")
+```
+
+# Exploratory Data Analysis
+Size of dataset, variable descriptions, distribution of data, heat maps, correlation plots. This section was heavy on visuals.
+
+```{r explore data}
+cfpb = data_orig   #so we don't have to keep loading it if we need to restart
+
+#summarize data
+#glimpse(cfpb)
+#summary(cfpb) 
+#dim(cfpb)
+#colSums(is.na(cfpb))  #num of blank columns
+
+#zip codes with XX in cfpb - 230,158
+#cfpb %>%
+#    filter(str_detect(ZIP.code, "XX")) %>%
+#    summarise(n = n())
+
+#format data
+cfpb$date_received <- as.Date(cfpb$'Date.received',format = "%m/%d/%y")
+#cfpb$date_received_year <- format(as.Date(cfpb$date_received, format="%m/%d/%y"),"%Y")
+cfpb$month_received <- floor_date(ymd(cfpb$date_received), 'month')
+cfpb$date_sent_to_company <- as.Date(cfpb$'Date.sent.to.company',format = "%m/%d/%y")
+#cfpb$date_sent_to_company_year <- format(as.Date(cfpb$date_sent_to_company, format="%m/%d/%y"),"%Y")
+cfpb$month_sent_to_company <- floor_date(ymd(cfpb$date_sent_to_company), 'month')
+
+#add columns
+cfpb$cfpb_zip_three <- substr(cfpb$ZIP.code,1,3)     #first three digits of zip code
+
+#rename columns
+cfpb <- cfpb %>% rename_at('Sub.product', ~'Sub_product')
+cfpb <- cfpb %>% rename_at('Sub.issue', ~'Sub_issue')
+cfpb <- cfpb %>% rename_at('ZIP.code', ~'cfpb_zip')
+cfpb <- cfpb %>% rename_at('State', ~'cfpb_state')
+cfpb <- cfpb %>% rename_at('Consumer.consent.provided.', ~'consent')
+cfpb <- cfpb %>% rename_at('Company.response.to.consumer', ~'response_sent')
+cfpb <- cfpb %>% rename_at('Timely.response.', ~'response_timely')
+cfpb <- cfpb %>% rename_at('Consumer.disputed.', ~'response_disputed')
+
+#drop duplicate columns
+cfpb <- cfpb %>% select(-one_of('Date.received','Date.sent.to.company'))
+
+```
+
+Roll up data by category summary counts
+
+```{r zip code clean up}
+
+###########################################################
+#load zip code data
+data_zip = read.csv("zip_code_database.csv",
+                    colClasses = (rep("character",15)))
+
+#zip and state and remove duplicate lines
+data_zip <- data_zip %>%
+    select(zip,state) %>%
+    distinct(.keep_all = TRUE)
+
+#add additional needed columns
+data_zip$zip_three <- substr(data_zip$zip,1,3)     #first three digits of zip code
+data_zip <- data_zip %>%
+    group_by(zip_three) %>% 
+    mutate(zip_min_in_three = min(zip))
+data_zip <- data_zip %>% rename_at('state', ~'zip_state')
+
+#truncate to just data we need for finding legit zip codes
+data_zip <- data_zip %>%
+    select(zip,zip_three,zip_min_in_three,zip_state) %>%
+    distinct(.keep_all = TRUE)
+
+#create table of legit three digit zips and min representative zip for filling in unknows in CFPB data
+data_zip_represent <- data_zip %>%
+    select(zip_three,zip_min_in_three,zip_state) %>%
+    distinct(.keep_all = TRUE)
+
+#data_zip_represent %>% group_by(zip_three) %>% summarise(n = n()) %>% arrange(desc(n))
+#data_zip_represent %>% filter(zip_three == '205')
+
+###########################################################
+#some zip codes are in format ###XX and some are XXXXX - filter those out that have no digits when made three digits
+cfpb_clean_zip <- cfpb %>%
+    filter(str_detect(cfpb_zip_three, "^[:digit:]+$"))     # 1,968,304 rows
+
+# 1,968,304 vs 2,036,509 clean zip codes (96.6% clean)
+#cfpb_clean_zip %>%
+#    group_by(zip_three) %>%
+#    summarise(n = n()) %>%
+#    arrange(desc(n))
+
+#merge cfpb and zip data
+#first join full zip codes together to identify legit zip codes in cfpb
+data_merged1 <- left_join(cfpb_clean_zip, 
+                         data_zip, 
+                         by=c('cfpb_zip'='zip'))
+data_merged2 <- data_merged1 %>% filter(!is.na(zip_three))     # 1,787,463 rows
+data_merged2 <- data_merged2 %>%
+    mutate(zip_best=cfpb_zip) %>%     #best zip is one from cfpb because that's how the join worked
+    mutate(zip_three_best=cfpb_zip_three) %>%     #best zip is one from cfpb because that's how the join worked
+    mutate(zip_state_best=ifelse(cfpb_state!=zip_state,zip_state,cfpb_state)) %>%     #grab zip_state first, otherwise cfpb state
+    select(-one_of('zip_three','zip_min_in_three','zip_state'))
+
+#now try to find a match for those zip codes that did not map properly
+data_merged3 <- data_merged1 %>% filter(is.na(zip_three))      # 180,841 rows
+data_merged3 <- data_merged3 %>% 
+    select(-one_of('zip_three','zip_min_in_three','zip_state'))
+data_merged4 <- left_join(data_merged3, 
+                          data_zip_represent, 
+                          by=c('cfpb_zip_three'='zip_three',
+                               'cfpb_state' = 'zip_state'))
+data_merged4 <- data_merged4 %>%     #180,607
+    filter(!is.na(zip_min_in_three)) %>%
+    mutate(zip_best=zip_min_in_three) %>%     #best zip is min lookup because these are the zips that didn't initially match
+    mutate(zip_three_best=cfpb_zip_three) %>%     #best zip is one from cfpb because that's how the join worked
+    mutate(zip_state_best=cfpb_state) %>%     #from cfpb because of join
+    select(-one_of('zip_min_in_three'))
+
+#merge the two together
+data_with_mapped_zip <- bind_rows(data_merged2, data_merged4)
+
+###########################################################
+data_summarized <- data_with_mapped_zip %>%
+    group_by(Product,
+             Sub_product,
+             Issue,
+             Sub_issue,
+             Company,
+             month_received,
+             zip_best,
+             zip_three_best,
+             zip_state_best) %>%
+    summarise(n = n()) %>%
+    arrange(desc(n))
+data_summarized
+
+#write.csv(data_summarized, "cfpb_data_summarized.csv", row.names=FALSE)
+```
+
+```{r add columns back to original data set}
+
+data_best_zip <- data_with_mapped_zip %>%
+    select(Complaint.ID,zip_best,zip_three_best,zip_state_best) %>%
+    distinct(.keep_all = TRUE)
+
+data_orig_with_mapped_zip <- left_join(data_orig, 
+                                       data_best_zip, 
+                                       by=c('Complaint.ID'='Complaint.ID'))
+
+colSums(is.na(data_orig_with_mapped_zip))     #68439 bad best zip codes
+
+data_orig_with_mapped_zip <- data_orig_with_mapped_zip %>% 
+    mutate(zip_best = if_else(is.na(zip_best), 'NONE', zip_best)) %>% 
+    mutate(zip_three_best = if_else(is.na(zip_three_best), 'NONE', zip_three_best)) %>% 
+    mutate(zip_state_best = if_else(is.na(zip_state_best), 'NONE', zip_state_best))
+
+write.csv(data_orig_with_mapped_zip, "cfpb_data_with_clean_zip.csv", row.names=FALSE)
+```
+
