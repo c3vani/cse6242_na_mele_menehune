@@ -1,0 +1,155 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+# rm(list = ls())
+
+# Data Wrangling and Visualization
+library(glue)
+library(cowplot)
+library(magrittr)
+library(plotly)
+library(tidyverse)
+library(widyr)
+# Date & Time Manipulation.
+library(hms)
+library(lubridate) 
+# Text Mining
+library(tidytext)
+library(tm)
+library(wordcloud)
+# Network Analysis
+library(igraph)
+# Network Visualization (D3.js)
+library(networkD3)
+library(ngram)
+
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+```
+```{r}
+complaints <- read.csv("C:/Users/aloha/OneDrive/Desktop/complaints-2024-03-04_20_55.csv")
+```
+
+```{r, error=FALSE}
+#data fixes, updates
+complaints <- complaints[,-16]
+complaints$Product <- as.factor(complaints$Product)
+complaints$Sub.product <- as.factor(complaints$Sub.product)
+complaints$Issue <- as.factor(complaints$Issue)
+complaints$Sub.issue <- as.factor(complaints$Sub.issue)
+complaints$State <- as.factor(complaints$State)
+complaints$Company.response.to.consumer <- as.factor(complaints$Company.response.to.consumer)
+complaints$Company.public.response <- as.factor(complaints$Company.public.response)
+complaints$Consumer.consent.provided. <- as.factor(complaints$Consumer.consent.provided.)
+complaints$Submitted.via <- as.factor(complaints$Submitted.via)
+complaints$Date.received <- mdy(complaints$Date.received)
+complaints$Year <- year(complaints$Date.received)
+complaints$Date.sent.to.company <- mdy(complaints$Date.sent.to.company)
+```
+
+```{r}
+complaints.raw.df <- as_tibble(complaints)
+
+# Remove anonymized data, punctuation, digits, and make all lower case
+complaints.df <- complaints.raw.df %>%
+select(Consumer.complaint.narrative) %>%
+  mutate(Consumer.complaint.narrative = Consumer.complaint.narrative %>% str_remove_all(pattern = 'XX'))%>%
+  mutate(Consumer.complaint.narrative = Consumer.complaint.narrative %>% str_remove_all(pattern = '[[:punct:]]')) %>%
+  mutate(Consumer.complaint.narrative = Consumer.complaint.narrative %>% str_remove_all(pattern = '\\d')) %>%
+  mutate(Consumer.complaint.narrative = Consumer.complaint.narrative %>% tolower()) %>%
+  filter(Consumer.complaint.narrative != "" & !is.na(Consumer.complaint.narrative))
+```
+
+```{r}
+start_time <- Sys.time()
+skip.window <- 2
+
+dist_data <- complaints.df %>%
+  distinct()
+
+complainalyzer <- function(data){
+  stopwords.df <- data.frame(word = stopwords("en"), stringsAsFactors = FALSE)
+  skip_gram_words <- data %>%
+    unnest_tokens(
+      input = Consumer.complaint.narrative,
+      output = skipgram,
+      token = 'skip_ngrams',
+      n = skip.window
+    ) %>%
+   filter(! is.na(skipgram))
+
+  skip_gram_words %<>%
+  separate(col = skipgram, into = c('word1', 'word2'), sep = ' ') %>%
+    filter(! word1 %in% stopwords.df$word) %>%
+    filter(! word2 %in% stopwords.df$word) %>%
+    filter(! is.na(word1)) %>%
+    filter(! is.na(word2))
+
+  skip_gram_count <- skip_gram_words  %>%
+    count(word1, word2, sort = TRUE) %>%
+    rename(weight = n)
+
+  return(skip_gram_count)
+}
+dup_data <- complainalyzer(complaints.df)
+dis_data <- complainalyzer(dist_data)
+```
+
+```{r}
+# so much credit goes to https://juanitorduz.github.io/text-mining-networks-and-visualization-plebiscito-tweets/
+  
+threshold <- nrow(complaints.df) / 200
+
+# Change source for duplicated or de-duped 
+network <-  dup_data %>%
+  filter(weight > threshold) %>%
+  graph_from_data_frame(directed = FALSE)
+# Select biggest connected component
+V(network)$cluster <- clusters(graph = network)$membership
+cc.network <- induced_subgraph(graph = network, vids = which(V(network)$cluster == which.max(clusters(graph = network)$csize)))
+# Store the degree
+V(cc.network)$degree <- strength(graph = cc.network)
+# Compute the weight shares
+E(cc.network)$width <- E(cc.network)$weight/max(E(cc.network)$weight)
+# Create networkD3 object
+network.D3 <- igraph_to_networkD3(g = cc.network)
+# Define node size
+network.D3$nodes %<>% mutate(Degree = (1E-2)*V(cc.network)$degree)
+# Define color group (I will explore this feature later)
+network.D3$nodes %<>% mutate(Group = 1)
+# Define edges width
+network.D3$links$Width <- 10*E(cc.network)$width
+skip_gram_named_list <- setNames(as.list(total_dup_count$combined), total_dup_count$weight)
+# Louvain for community detection
+comm.det.obj <- cluster_louvain(graph = cc.network, weights = E(cc.network)$weight)
+comm.det.obj
+V(cc.network)$membership <- membership(comm.det.obj)
+network.D3$nodes$Group <- V(cc.network)$membership
+forceNetwork(
+  Links = network.D3$links, Nodes = network.D3$nodes, Source = 'source', Target = 'target',NodeID = 'name', Group = 'Group', opacity = 0.9, Value = 'Width', Nodesize = 'Degree', linkWidth = JS("function(d) { return Math.sqrt(d.value); }"), fontSize = 12,zoom = TRUE, opacityNoHover = 1)
+```
+
+```{r}
+# Convert cluster object to Dataframe
+
+# Get the names of the nodes
+node_names <- V(cc.network)$name
+# Get the membership vector
+membership_vector <- membership(comm.det.obj)
+corpus <- comm.det.obj[membership_vector]
+# Create a list where each element is the names of the nodes in a cluster
+clusters <- lapply(unique(membership_vector), function(cluster) {node_names[membership_vector == cluster]})
+# Pad the lists with NA so that they all have the same length
+max_length <- max(sapply(clusters, length))
+clusters_padded <- lapply(clusters, function(cluster) {c(cluster, rep(NA, max_length - length(cluster)))})
+# Convert the list to a data frame
+df <- do.call(rbind, clusters_padded)
+# Set the column names
+colnames(df) <- paste0("word", seq_len(ncol(df)))
+df
+```
